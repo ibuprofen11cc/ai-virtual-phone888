@@ -922,6 +922,25 @@ function normalizeEntityName(value: string | undefined): string {
   return (value ?? "").trim().toLowerCase();
 }
 
+function matchCharacterByName(name: string, characters: Character[]): Character | null {
+  const normalized = normalizeEntityName(name);
+  if (!normalized) return null;
+  return characters.find(c => normalizeEntityName(c.name) === normalized) || null;
+}
+
+function buildCharacterRosterPrompt(characters: Character[], activeCharacterId: string): string {
+  const others = characters.filter(c => c.id !== activeCharacterId);
+  if (others.length === 0) return "";
+  
+  const lines = others.map(c => `- ${c.name}: ${c.subtitle || "无描述"}`);
+  return [
+    "<available_characters>",
+    "以下是你可能认识的其他真实角色。在生成“补充会话”或“补充联系人”时，请优先考虑这些角色作为对话对象，并确保他们的性格和话题符合描述：",
+    ...lines,
+    "</available_characters>"
+  ].join("\n");
+}
+
 function normalizeVisibleChatMessages(messages: ChatMessage[]): ChatMessage[] {
   return messages.filter((msg) => {
     if (msg.mediaType === "tool_call" || msg.mediaType === "tool_result" || msg.mediaType === "memory_write_request" || msg.mediaType === "tool_notice") return false;
@@ -1209,7 +1228,7 @@ async function buildCheckPhoneAppMessages(
     unifiedRecentItems,
     phoneAppId: appId,
     phoneAppLabel: CHECKPHONE_APP_SPECS[appId].label,
-    phoneSnapshotSummary: options?.snapshotSummary ?? "",
+    phoneSnapshotSummary: (appId === "chat" ? buildCharacterRosterPrompt(loadCharacters(), characterId) + "\n" : "") + (options?.snapshotSummary ?? ""),
     phoneLastRefreshAt: options?.lastRefreshAt ?? "",
     checkPhoneBilingualInstruction: buildCheckPhoneBilingualInstruction(
       settings.bilingualTranslationEnabled,
@@ -5071,6 +5090,7 @@ function normalizeChatPayload(payload: unknown): Partial<CheckPhoneChatPayload> 
     return { id, text, timeLabel, direction, authorLabel };
   };
 
+  const chars = loadCharacters();
   const conversations = conversationSource
     .map((item) => {
       if (!item || typeof item !== "object") return null;
@@ -5080,8 +5100,15 @@ function normalizeChatPayload(payload: unknown): Partial<CheckPhoneChatPayload> 
       const tagLabel = typeof thread.tagLabel === "string" && thread.tagLabel.trim() ? thread.tagLabel.trim() : "会话";
       const muted = thread.muted === true;
       const pinned = thread.pinned === true;
+      const matchedChar = matchCharacterByName(name, chars);
       const messages = (Array.isArray(thread.messages) ? thread.messages : [])
-        .map((entry) => normalizeBubble(entry))
+        .map((entry) => {
+          const bubble = normalizeBubble(entry);
+          if (bubble && matchedChar && bubble.direction === "incoming") {
+            return { ...bubble, characterId: matchedChar.id };
+          }
+          return bubble;
+        })
         .filter(Boolean) as CheckPhoneChatPayload["conversations"][number]["messages"];
       const slicedMessages = messages.slice(0, 10);
       const lastMessage = slicedMessages[slicedMessages.length - 1];
@@ -5095,6 +5122,7 @@ function normalizeChatPayload(payload: unknown): Partial<CheckPhoneChatPayload> 
         pinned,
         tagLabel,
         messages: slicedMessages,
+        characterId: matchedChar?.id,
       };
     })
     .filter(Boolean) as CheckPhoneChatPayload["conversations"];
@@ -5111,7 +5139,14 @@ function normalizeChatPayload(payload: unknown): Partial<CheckPhoneChatPayload> 
         typeof group.activityLabel === "string" && group.activityLabel.trim() ? group.activityLabel.trim() : "最近活跃";
       const muted = group.muted === true;
       const messages = (Array.isArray(group.messages) ? group.messages : [])
-        .map((entry) => normalizeBubble(entry, true))
+        .map((entry) => {
+          const bubble = normalizeBubble(entry, true);
+          if (bubble && bubble.direction === "incoming" && bubble.authorLabel) {
+            const matched = matchCharacterByName(bubble.authorLabel, chars);
+            if (matched) return { ...bubble, characterId: matched.id };
+          }
+          return bubble;
+        })
         .filter(Boolean) as CheckPhoneChatPayload["groups"][number]["messages"];
       const slicedMessages = messages.slice(0, 10);
       const lastMessage = slicedMessages[slicedMessages.length - 1];
@@ -5144,6 +5179,7 @@ function normalizeChatPayload(payload: unknown): Partial<CheckPhoneChatPayload> 
         typeof post.photoDescription === "string" && post.photoDescription.trim() ? post.photoDescription.trim() : undefined;
       const likeCountLabel = typeof post.likeCountLabel === "string" && post.likeCountLabel.trim() ? post.likeCountLabel.trim() : "0 赞";
       const commentCountLabel = typeof post.commentCountLabel === "string" && post.commentCountLabel.trim() ? post.commentCountLabel.trim() : "0 评论";
+      const matchedPostAuthor = matchCharacterByName(authorLabel, chars);
       const comments = (Array.isArray(post.comments) ? post.comments : [])
         .map((entry) => {
           if (!entry || typeof entry !== "object") return null;
@@ -5155,7 +5191,8 @@ function normalizeChatPayload(payload: unknown): Partial<CheckPhoneChatPayload> 
           const replyToLabel =
             typeof comment.replyToLabel === "string" && comment.replyToLabel.trim() ? comment.replyToLabel.trim() : undefined;
           if (!commentId || !commentAuthor || !commentTime || !text) return null;
-          return { id: commentId, authorLabel: commentAuthor, timeLabel: commentTime, text, replyToLabel };
+          const matchedCommentAuthor = matchCharacterByName(commentAuthor, chars);
+          return { id: commentId, authorLabel: commentAuthor, timeLabel: commentTime, text, replyToLabel, characterId: matchedCommentAuthor?.id };
         })
         .filter(Boolean) as CheckPhoneChatPayload["momentsFeed"][number]["comments"];
       if (!id || !authorLabel || !timeLabel || !body) return null;
@@ -5171,6 +5208,7 @@ function normalizeChatPayload(payload: unknown): Partial<CheckPhoneChatPayload> 
         likeCountLabel,
         commentCountLabel,
         comments: comments.slice(0, 8),
+        characterId: matchedPostAuthor?.id,
       };
     })
     .filter(Boolean) as CheckPhoneChatPayload["momentsFeed"];
@@ -5187,7 +5225,8 @@ function normalizeChatPayload(payload: unknown): Partial<CheckPhoneChatPayload> 
       const recentLabel = typeof contact.recentLabel === "string" && contact.recentLabel.trim() ? contact.recentLabel.trim() : "";
       const note = typeof contact.note === "string" ? contact.note.trim() : "";
       if (!id || !name || !tagLabel || !relationLabel || !recentLabel || !note) return null;
-      return { id, name, tagLabel, relationLabel, recentLabel, note };
+      const matched = matchCharacterByName(name, chars);
+      return { id, name, tagLabel, relationLabel, recentLabel, note, characterId: matched?.id };
     })
     .filter(Boolean) as CheckPhoneChatPayload["contacts"];
 

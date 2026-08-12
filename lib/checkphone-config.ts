@@ -149,6 +149,7 @@ export type CheckPhoneChatBubble = {
   timeLabel: string;
   direction: "incoming" | "outgoing";
   authorLabel?: string;
+  characterId?: string;
 };
 
 export type CheckPhoneChatConversation = {
@@ -160,6 +161,7 @@ export type CheckPhoneChatConversation = {
   pinned?: boolean;
   tagLabel: string;
   messages: CheckPhoneChatBubble[];
+  characterId?: string;
 };
 
 export type CheckPhoneChatGroup = {
@@ -179,6 +181,7 @@ export type CheckPhoneChatMomentComment = {
   timeLabel: string;
   text: string;
   replyToLabel?: string;
+  characterId?: string;
 };
 
 export type CheckPhoneChatMomentItem = {
@@ -193,6 +196,7 @@ export type CheckPhoneChatMomentItem = {
   likeCountLabel: string;
   commentCountLabel: string;
   comments: CheckPhoneChatMomentComment[];
+  characterId?: string;
 };
 
 export type CheckPhoneChatContact = {
@@ -202,6 +206,7 @@ export type CheckPhoneChatContact = {
   relationLabel: string;
   recentLabel: string;
   note: string;
+  characterId?: string;
 };
 
 export type CheckPhoneChatPayload = {
