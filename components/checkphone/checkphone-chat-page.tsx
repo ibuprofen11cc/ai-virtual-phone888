@@ -726,8 +726,11 @@ export function CheckPhoneChatPage({
   const [debugRawOutput, setDebugRawOutput] = useState<string | null>(null);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
   const [relationshipsOpen, setRelationshipsOpen] = useState(false);
+  const [impressionOpen, setImpressionOpen] = useState(false);
   const [relationships, setRelationships] = useState<CheckPhoneChatRelationship[]>([]);
+  const [impression, setImpression] = useState<CheckPhoneChatRelationship | null>(null);
   const [loadingRelationships, setLoadingRelationships] = useState(false);
+  const [loadingImpression, setLoadingImpression] = useState(false);
   const [continuingThread, setContinuingThread] = useState(false);
   const [regeneratingThread, setRegeneratingThread] = useState(false);
 
@@ -819,9 +822,28 @@ export function CheckPhoneChatPage({
       const nextSnapshot = { ...snapshot, payload: nextPayload, updatedAt: new Date().toISOString() };
       await savePhoneSnapshot(nextSnapshot);
       setSnapshot(nextSnapshot);
+      
+      // 实时更新手机主人对该角色的印象
+      handleRefreshImpression(nextPayload);
     }
     setError(nextError ?? null);
     setContinuingThread(false);
+  }
+
+  async function handleRefreshImpression(currentPayload?: CheckPhoneChatPayload) {
+    const targetName = activeConversation?.name || activeGroup?.name;
+    if (!targetName) return;
+    
+    setLoadingImpression(true);
+    const { relationships: nextRels } = await generateCheckPhoneChatRelationships(
+      character.id,
+      currentPayload || snapshot?.payload as CheckPhoneChatPayload,
+      targetName
+    );
+    if (nextRels.length > 0) {
+      setImpression(nextRels[0]);
+    }
+    setLoadingImpression(false);
   }
 
   async function handleRegenerateThread() {
@@ -846,24 +868,28 @@ export function CheckPhoneChatPage({
 
   async function handleShowRelationships() {
     setRelationshipsOpen(true);
-    // 如果已经有数据，先显示旧数据，让用户决定是否刷新
+    // 如果已经有数据，不自动刷新
     if (relationships.length > 0) return;
-    
     await handleRefreshRelationships();
   }
 
   async function handleRefreshRelationships() {
-    const targetName = activeConversation?.name || activeGroup?.name;
     setLoadingRelationships(true);
-    const { relationships: nextRels, error: nextError } = await generateCheckPhoneChatRelationships(
+    // 这里明确只获取关系网（不传特定 targetName，由 AI 自行分析）
+    const { relationships: nextRels } = await generateCheckPhoneChatRelationships(
       character.id,
-      snapshot?.payload as CheckPhoneChatPayload,
-      targetName
+      snapshot?.payload as CheckPhoneChatPayload
     );
     if (nextRels.length > 0) {
       setRelationships(nextRels);
     }
     setLoadingRelationships(false);
+  }
+
+  async function handleShowImpression() {
+    setImpressionOpen(true);
+    if (impression) return;
+    await handleRefreshImpression();
   }
 
   const payload = snapshot?.payload ?? null;
@@ -967,7 +993,9 @@ export function CheckPhoneChatPage({
               }}
             >
               {activeConversation || activeGroup ? (
-                <div
+                <button
+                  type="button"
+                  onClick={handleShowImpression}
                   style={{
                     maxWidth: "100%",
                     minWidth: 0,
@@ -975,6 +1003,10 @@ export function CheckPhoneChatPage({
                     alignItems: "center",
                     justifyContent: "center",
                     gap: "8px",
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer"
                   }}
                 >
                   <div
@@ -1016,7 +1048,7 @@ export function CheckPhoneChatPage({
                       ? `${activeGroup.name}（${formatGroupMemberCountLabel(activeGroup.memberCountLabel)}）`
                       : activeConversationDisplayName}
                   </strong>
-                </div>
+                </button>
               ) : (
                 <strong
                   style={{
@@ -2352,8 +2384,8 @@ export function CheckPhoneChatPage({
             <div style={{ width: "40px", height: "5px", background: "rgba(62, 67, 95, 0.12)", borderRadius: "3px", margin: "0 auto 24px" }} />
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
               <h3 style={{ margin: 0, fontSize: "calc(19px*var(--app-text-scale,1))", fontWeight: 600, color: "#20243a", display: "flex", alignItems: "center", gap: "10px" }}>
-                <Heart size={20} fill="#7b57e8" strokeWidth={0} />
-                人际关系
+                <Users size={20} color="#7b57e8" strokeWidth={2} />
+                角色关系网
               </h3>
               <button 
                 onClick={handleRefreshRelationships} 
@@ -2368,10 +2400,8 @@ export function CheckPhoneChatPage({
               {loadingRelationships ? (
                 <div style={{ padding: "40px 0", textAlign: "center", color: "rgba(62, 67, 95, 0.42)" }}>
                   <RefreshCw size={24} className="cp-spin" style={{ margin: "0 auto 12px" }} />
-                  <p style={{ fontSize: "14px" }}>正在分析社交网络...</p>
+                  <p style={{ fontSize: "14px" }}>正在深度解析社交圈...</p>
                 </div>
-              ) : relationships.length === 0 ? (
-                <p style={{ padding: "40px 0", textAlign: "center", color: "rgba(62, 67, 95, 0.42)", fontSize: "14px" }}>暂无深度关系分析</p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                   {relationships.map((rel, idx) => (
@@ -2388,20 +2418,6 @@ export function CheckPhoneChatPage({
                         }}>{rel.goodwillLabel}</span>
                       </div>
                       <p style={{ fontSize: "13px", color: "rgba(62, 67, 95, 0.78)", lineHeight: 1.6, margin: 0 }}>{rel.impression}</p>
-                      {rel.recentInteraction && (
-                        <div style={{ 
-                          marginTop: "12px", 
-                          paddingTop: "12px", 
-                          borderTop: "1px dashed rgba(123, 87, 232, 0.14)", 
-                          fontSize: "11px", 
-                          color: "rgba(62, 67, 95, 0.48)",
-                          display: "flex",
-                          gap: "4px"
-                        }}>
-                          <span style={{ flexShrink: 0 }}>交互回顾:</span>
-                          <span>{rel.recentInteraction}</span>
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>
@@ -2422,6 +2438,93 @@ export function CheckPhoneChatPage({
               }}
             >
               了解完毕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {impressionOpen && (
+        <div 
+          onClick={() => setImpressionOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 100,
+            background: "rgba(32, 36, 58, 0.32)",
+            backdropFilter: "blur(12px)",
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "center",
+          }}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: "420px",
+              background: "#fff",
+              borderRadius: "32px 32px 0 0",
+              padding: "28px 24px calc(28px + env(safe-area-inset-bottom, 0px))",
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 -20px 60px rgba(62, 67, 95, 0.12)",
+              animation: "cp-slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
+            }}
+          >
+            <div style={{ width: "40px", height: "5px", background: "rgba(62, 67, 95, 0.12)", borderRadius: "3px", margin: "0 auto 24px" }} />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+              <h3 style={{ margin: 0, fontSize: "calc(19px*var(--app-text-scale,1))", fontWeight: 600, color: "#20243a", display: "flex", alignItems: "center", gap: "10px" }}>
+                <Heart size={20} fill="#ff4d4f" color="#ff4d4f" />
+                我的印象
+              </h3>
+              <button 
+                onClick={() => handleRefreshImpression()} 
+                disabled={loadingImpression}
+                style={{ background: "none", border: "none", color: "#7b57e8", display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", fontWeight: 500 }}
+              >
+                <RefreshCw size={14} className={loadingImpression ? "cp-spin" : ""} />
+                实时评估
+              </button>
+            </div>
+            
+            {loadingImpression ? (
+              <div style={{ padding: "40px 0", textAlign: "center", color: "rgba(62, 67, 95, 0.42)" }}>
+                <RefreshCw size={24} className="cp-spin" style={{ margin: "0 auto 12px" }} />
+                <p style={{ fontSize: "14px" }}>正在感知心跳...</p>
+              </div>
+            ) : impression ? (
+              <div style={{ padding: "24px", background: "linear-gradient(145deg, #fff5f5, #fffcfc)", border: "1px solid #ffebeb", borderRadius: "24px", textAlign: "center" }}>
+                <div style={{ marginBottom: "16px" }}>
+                  <span style={{ fontSize: "12px", color: "#ff7875", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em" }}>当前好感度</span>
+                  <div style={{ fontSize: "28px", fontWeight: 800, color: "#ff4d4f", marginTop: "4px" }}>{impression.goodwillLabel}</div>
+                </div>
+                <div style={{ marginBottom: "20px" }}>
+                  <div style={{ fontSize: "15px", color: "#434343", lineHeight: 1.7, fontStyle: "italic" }}>“{impression.impression}”</div>
+                </div>
+                {impression.recentInteraction && (
+                  <div style={{ padding: "12px", background: "#fff", borderRadius: "14px", fontSize: "12px", color: "#8c8c8c", border: "1px solid #f0f0f0" }}>
+                    <strong>最新互动：</strong>{impression.recentInteraction}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p style={{ padding: "40px 0", textAlign: "center", color: "rgba(62, 67, 95, 0.42)", fontSize: "14px" }}>暂无印象记录，点击评估开始分析</p>
+            )}
+
+            <button 
+              onClick={() => setImpressionOpen(false)} 
+              style={{ 
+                marginTop: "24px", 
+                height: "52px",
+                background: "#20243a", 
+                color: "#fff", 
+                borderRadius: "16px",
+                fontWeight: 600,
+                fontSize: "15px",
+                border: "none"
+              }}
+            >
+              返回对话
             </button>
           </div>
         </div>

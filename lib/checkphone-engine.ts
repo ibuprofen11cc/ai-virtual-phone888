@@ -5272,7 +5272,7 @@ export async function continueCheckPhoneChatThread(
       `当前正在进行的会话：${thread.name}`,
       `已有消息历史：`,
       ...thread.messages.slice(-5).map((m) => `- ${m.authorLabel || (m.direction === "outgoing" ? "我" : "对方")}: ${m.text} [${m.timeLabel}]`),
-      `请【接着】上面的对话继续生成 3-5 条【新】消息。`,
+      `请【接着】上面的对话继续生成 5-7 条【新】消息。`,
       `【绝对禁止】重复输出上述已有的历史消息。`,
       `保持角色性格和对话情境一致。`,
     ].join("\n");
