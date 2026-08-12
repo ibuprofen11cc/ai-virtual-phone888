@@ -34,6 +34,7 @@ import type {
 import {
   generateCheckPhoneChat,
   continueCheckPhoneChatThread,
+  regenerateCheckPhoneChatThread,
   generateCheckPhoneChatRelationships,
 } from "@/lib/checkphone-engine";
 import {
@@ -728,6 +729,7 @@ export function CheckPhoneChatPage({
   const [relationships, setRelationships] = useState<CheckPhoneChatRelationship[]>([]);
   const [loadingRelationships, setLoadingRelationships] = useState(false);
   const [continuingThread, setContinuingThread] = useState(false);
+  const [regeneratingThread, setRegeneratingThread] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -822,14 +824,41 @@ export function CheckPhoneChatPage({
     setContinuingThread(false);
   }
 
+  async function handleRegenerateThread() {
+    const threadId = selectedConversationId || selectedGroupId;
+    if (!threadId || !snapshot || regeneratingThread) return;
+
+    setRegeneratingThread(true);
+    const { payload: nextPayload, error: nextError } = await regenerateCheckPhoneChatThread(
+      character.id,
+      threadId,
+      snapshot.payload
+    );
+
+    if (nextPayload) {
+      const nextSnapshot = { ...snapshot, payload: nextPayload, updatedAt: new Date().toISOString() };
+      await savePhoneSnapshot(nextSnapshot);
+      setSnapshot(nextSnapshot);
+    }
+    setError(nextError ?? null);
+    setRegeneratingThread(false);
+  }
+
   async function handleShowRelationships() {
     setRelationshipsOpen(true);
-    if (!snapshot || loadingRelationships) return;
+    // 如果已经有数据，先显示旧数据，让用户决定是否刷新
+    if (relationships.length > 0) return;
     
+    await handleRefreshRelationships();
+  }
+
+  async function handleRefreshRelationships() {
+    const targetName = activeConversation?.name || activeGroup?.name;
     setLoadingRelationships(true);
     const { relationships: nextRels, error: nextError } = await generateCheckPhoneChatRelationships(
       character.id,
-      snapshot.payload
+      snapshot?.payload as CheckPhoneChatPayload,
+      targetName
     );
     if (nextRels.length > 0) {
       setRelationships(nextRels);
@@ -1004,10 +1033,11 @@ export function CheckPhoneChatPage({
               )}
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
+              {/* 继续对话按钮 */}
               <button
                 type="button"
                 onClick={handleContinue}
-                disabled={continuingThread}
+                disabled={continuingThread || regeneratingThread}
                 style={{
                   width: "40px",
                   height: "40px",
@@ -1016,14 +1046,36 @@ export function CheckPhoneChatPage({
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  color: continuingThread ? "#999" : "#7b57e8",
+                  color: (continuingThread || regeneratingThread) ? "#ccc" : "#7b57e8",
                   border: "1px solid rgba(159, 164, 188, 0.18)",
                   boxShadow: "0 8px 20px rgba(64, 69, 102, 0.05)",
                 }}
                 title="继续对话"
               >
-                <RefreshCw size={18} strokeWidth={2.5} className={continuingThread ? "cp-spin" : ""} />
+                <Plus size={20} strokeWidth={2.5} className={continuingThread ? "cp-spin" : ""} />
               </button>
+              {/* 仅刷新当前会话按钮 */}
+              <button
+                type="button"
+                onClick={handleRegenerateThread}
+                disabled={continuingThread || regeneratingThread}
+                style={{
+                  width: "40px",
+                  height: "40px",
+                  borderRadius: "50%",
+                  background: "rgba(255, 255, 255, 0.82)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: (continuingThread || regeneratingThread) ? "#ccc" : "#8a63f2",
+                  border: "1px solid rgba(159, 164, 188, 0.18)",
+                  boxShadow: "0 8px 20px rgba(64, 69, 102, 0.05)",
+                }}
+                title="重刷此会话"
+              >
+                <RefreshCw size={17} strokeWidth={2.2} className={regeneratingThread ? "cp-spin" : ""} />
+              </button>
+              {/* 印象与关系菜单 */}
               <button
                 type="button"
                 onClick={handleShowRelationships}
@@ -1039,6 +1091,7 @@ export function CheckPhoneChatPage({
                   border: "1px solid rgba(159, 164, 188, 0.18)",
                   boxShadow: "0 8px 20px rgba(64, 69, 102, 0.05)",
                 }}
+                title="好感度与印象"
               >
                 <MoreHorizontal size={20} strokeWidth={2} />
               </button>
@@ -2297,10 +2350,20 @@ export function CheckPhoneChatPage({
             }}
           >
             <div style={{ width: "40px", height: "5px", background: "rgba(62, 67, 95, 0.12)", borderRadius: "3px", margin: "0 auto 24px" }} />
-            <h3 style={{ margin: "0 0 20px", fontSize: "calc(19px*var(--app-text-scale,1))", fontWeight: 600, color: "#20243a", display: "flex", alignItems: "center", gap: "10px" }}>
-              <Heart size={20} fill="#7b57e8" strokeWidth={0} />
-              人际关系
-            </h3>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+              <h3 style={{ margin: 0, fontSize: "calc(19px*var(--app-text-scale,1))", fontWeight: 600, color: "#20243a", display: "flex", alignItems: "center", gap: "10px" }}>
+                <Heart size={20} fill="#7b57e8" strokeWidth={0} />
+                人际关系
+              </h3>
+              <button 
+                onClick={handleRefreshRelationships} 
+                disabled={loadingRelationships}
+                style={{ background: "none", border: "none", color: "#7b57e8", display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", fontWeight: 500 }}
+              >
+                <RefreshCw size={14} className={loadingRelationships ? "cp-spin" : ""} />
+                刷新分析
+              </button>
+            </div>
             <div style={{ flex: 1, overflowY: "auto", paddingRight: "4px" }} className="cp-scroll-guard">
               {loadingRelationships ? (
                 <div style={{ padding: "40px 0", textAlign: "center", color: "rgba(62, 67, 95, 0.42)" }}>

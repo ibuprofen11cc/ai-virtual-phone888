@@ -5267,11 +5267,13 @@ export async function continueCheckPhoneChatThread(
 
     if (!thread) return { payload: currentPayload, error: "未找到指定的会话" };
 
+    const historyTexts = new Set(thread.messages.map(m => m.text.trim()));
     const promptContext = [
       `当前正在进行的会话：${thread.name}`,
       `已有消息历史：`,
-      ...thread.messages.map((m) => `- ${m.authorLabel || (m.direction === "outgoing" ? "我" : "对方")}: ${m.text} [${m.timeLabel}]`),
-      `请接着上面的对话继续生成 3-5 条新消息。`,
+      ...thread.messages.slice(-5).map((m) => `- ${m.authorLabel || (m.direction === "outgoing" ? "我" : "对方")}: ${m.text} [${m.timeLabel}]`),
+      `请【接着】上面的对话继续生成 3-5 条【新】消息。`,
+      `【绝对禁止】重复输出上述已有的历史消息。`,
       `保持角色性格和对话情境一致。`,
     ].join("\n");
 
@@ -5294,11 +5296,14 @@ export async function continueCheckPhoneChatThread(
     
     if (!normalized) return { payload: currentPayload, error: "无法解析新消息" };
 
-    const newMessages = isGroup 
+    const rawNewMessages = isGroup 
       ? (normalized.groups?.[0]?.messages ?? [])
       : (normalized.conversations?.[0]?.messages ?? []);
+    
+    // 过滤掉 LLM 可能重复输出的历史记录
+    const newMessages = rawNewMessages.filter(m => !historyTexts.has(m.text.trim()));
 
-    if (newMessages.length === 0) return { payload: currentPayload, error: "未生成新消息" };
+    if (newMessages.length === 0) return { payload: currentPayload, error: "未生成有效的新消息（可能 LLM 仅重复了历史记录）" };
 
     const nextPayload = { ...currentPayload };
     if (isGroup) {
@@ -5313,9 +5318,66 @@ export async function continueCheckPhoneChatThread(
   }
 }
 
+export async function regenerateCheckPhoneChatThread(
+  characterId: string,
+  threadId: string,
+  currentPayload: CheckPhoneChatPayload,
+): Promise<{ payload: CheckPhoneChatPayload; error?: string; debugRawOutput?: string }> {
+  const { apiConfig, preset, worldBooks, regexes } = resolveCheckPhoneConfigs(characterId);
+  if (!apiConfig) return { payload: currentPayload, error: "未找到可用的 API 配置" };
+
+  try {
+    const isGroup = threadId.includes("_group_");
+    const thread = isGroup
+      ? currentPayload.groups.find((g) => g.id === threadId)
+      : currentPayload.conversations.find((c) => c.id === threadId);
+
+    if (!thread) return { payload: currentPayload, error: "未找到指定的会话" };
+
+    const promptContext = `请重新生成会话“${thread.name}”的完整聊天记录（10条左右）。`;
+
+    const messages = await buildCheckPhoneAppMessages(characterId, "chat", preset, worldBooks, regexes, {
+      snapshotSummary: promptContext,
+    });
+
+    const rawOutput = await sendLLMRequest(
+      apiConfig,
+      preset,
+      messages,
+      regexes,
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { skipOutputRegex: true, appId: "checkphone_chat_regenerate" },
+    );
+
+    if (!rawOutput?.trim()) return { payload: currentPayload, error: "LLM 返回为空" };
+    const { parsed } = parseChatBlockPayload(rawOutput);
+    const normalized = normalizeChatPayload(parsed);
+    
+    if (!normalized) return { payload: currentPayload, error: "无法解析生成内容" };
+
+    const newThread = isGroup 
+      ? normalized.groups?.find(g => g.name === thread.name) || normalized.groups?.[0]
+      : normalized.conversations?.find(c => c.name === thread.name) || normalized.conversations?.[0];
+
+    if (!newThread) return { payload: currentPayload, error: "生成结果中未找到匹配的会话" };
+
+    const nextPayload = { ...currentPayload };
+    if (isGroup) {
+      nextPayload.groups = nextPayload.groups.map(g => g.id === threadId ? { ...g, messages: newThread.messages } : g);
+    } else {
+      nextPayload.conversations = nextPayload.conversations.map(c => c.id === threadId ? { ...c, messages: newThread.messages } : c);
+    }
+
+    return { payload: nextPayload, debugRawOutput: rawOutput };
+  } catch (error) {
+    return { payload: currentPayload, error: error instanceof Error ? error.message : "重刷失败" };
+  }
+}
+
 export async function generateCheckPhoneChatRelationships(
   characterId: string,
   currentPayload: CheckPhoneChatPayload,
+  targetName?: string,
 ): Promise<{ relationships: CheckPhoneChatRelationship[]; error?: string; debugRawOutput?: string }> {
   const { apiConfig, preset, worldBooks, regexes } = resolveCheckPhoneConfigs(characterId);
   if (!apiConfig) return { relationships: [], error: "未找到可用的 API 配置" };
@@ -5332,7 +5394,7 @@ export async function generateCheckPhoneChatRelationships(
 
     const promptContext = [
       `请根据以下聊天背景和联系人列表，通过角色 ${characterName} 的视角，描述他对这些人的“好感度”和“印象”：`,
-      `联系人：${uniqueNames.join("、")}`,
+      targetName ? `【重点分析对象】：${targetName}` : `联系人：${uniqueNames.join("、")}`,
       `要求：返回一个 JSON 数组，格式为：[{"name": "姓名", "goodwillLabel": "如：亲密/疏离/暗恋", "impression": "一句话印象", "recentInteraction": "最近的互动总结"}]`,
     ].join("\n");
 
