@@ -31,7 +31,11 @@ import type {
   CheckPhoneChatPayload,
   CheckPhoneSnapshot,
 } from "@/lib/checkphone-config";
-import { generateCheckPhoneChat } from "@/lib/checkphone-engine";
+import {
+  generateCheckPhoneChat,
+  continueCheckPhoneChatThread,
+  generateCheckPhoneChatRelationships,
+} from "@/lib/checkphone-engine";
 import {
   findCustomStickerByName,
   resolveCustomStickerUrl,
@@ -720,6 +724,10 @@ export function CheckPhoneChatPage({
   const [error, setError] = useState<string | null>(null);
   const [debugRawOutput, setDebugRawOutput] = useState<string | null>(null);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+  const [relationshipsOpen, setRelationshipsOpen] = useState(false);
+  const [relationships, setRelationships] = useState<CheckPhoneChatRelationship[]>([]);
+  const [loadingRelationships, setLoadingRelationships] = useState(false);
+  const [continuingThread, setContinuingThread] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -792,6 +800,41 @@ export function CheckPhoneChatPage({
     setDebugRawOutput(null);
     setLoaded(true);
     setConfirmClearOpen(false);
+  }
+
+  async function handleContinue() {
+    const threadId = selectedConversationId || selectedGroupId;
+    if (!threadId || !snapshot || continuingThread) return;
+
+    setContinuingThread(true);
+    const { payload: nextPayload, error: nextError } = await continueCheckPhoneChatThread(
+      character.id,
+      threadId,
+      snapshot.payload
+    );
+
+    if (nextPayload) {
+      const nextSnapshot = { ...snapshot, payload: nextPayload, updatedAt: new Date().toISOString() };
+      await savePhoneSnapshot(nextSnapshot);
+      setSnapshot(nextSnapshot);
+    }
+    setError(nextError ?? null);
+    setContinuingThread(false);
+  }
+
+  async function handleShowRelationships() {
+    setRelationshipsOpen(true);
+    if (!snapshot || loadingRelationships) return;
+    
+    setLoadingRelationships(true);
+    const { relationships: nextRels, error: nextError } = await generateCheckPhoneChatRelationships(
+      character.id,
+      snapshot.payload
+    );
+    if (nextRels.length > 0) {
+      setRelationships(nextRels);
+    }
+    setLoadingRelationships(false);
   }
 
   const payload = snapshot?.payload ?? null;
@@ -960,8 +1003,30 @@ export function CheckPhoneChatPage({
                 </strong>
               )}
             </div>
-            <button
-              type="button"
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                type="button"
+                onClick={handleContinue}
+                disabled={continuingThread}
+                style={{
+                  width: "40px",
+                  height: "40px",
+                  borderRadius: "50%",
+                  background: "rgba(255, 255, 255, 0.82)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: continuingThread ? "#999" : "#7b57e8",
+                  border: "1px solid rgba(159, 164, 188, 0.18)",
+                  boxShadow: "0 8px 20px rgba(64, 69, 102, 0.05)",
+                }}
+                title="继续对话"
+              >
+                <RefreshCw size={18} strokeWidth={2.5} className={continuingThread ? "cp-spin" : ""} />
+              </button>
+              <button
+                type="button"
+                onClick={handleShowRelationships}
                 style={{
                   width: "40px",
                   height: "40px",
@@ -975,8 +1040,9 @@ export function CheckPhoneChatPage({
                   boxShadow: "0 8px 20px rgba(64, 69, 102, 0.05)",
                 }}
               >
-              <MoreHorizontal size={20} strokeWidth={2} />
-            </button>
+                <MoreHorizontal size={20} strokeWidth={2} />
+              </button>
+            </div>
           </>
         ) : (
           <>
@@ -2201,6 +2267,102 @@ export function CheckPhoneChatPage({
           </div>
         )}
       </div>
+{relationshipsOpen && (
+        <div 
+          onClick={() => setRelationshipsOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 100,
+            background: "rgba(32, 36, 58, 0.32)",
+            backdropFilter: "blur(12px)",
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "center",
+          }}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: "420px",
+              maxHeight: "85vh",
+              background: "linear-gradient(180deg, #ffffff 0%, #fdfbff 100%)",
+              borderRadius: "32px 32px 0 0",
+              padding: "28px 24px calc(28px + env(safe-area-inset-bottom, 0px))",
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 -20px 60px rgba(62, 67, 95, 0.12)",
+              animation: "cp-slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
+            }}
+          >
+            <div style={{ width: "40px", height: "5px", background: "rgba(62, 67, 95, 0.12)", borderRadius: "3px", margin: "0 auto 24px" }} />
+            <h3 style={{ margin: "0 0 20px", fontSize: "calc(19px*var(--app-text-scale,1))", fontWeight: 600, color: "#20243a", display: "flex", alignItems: "center", gap: "10px" }}>
+              <Heart size={20} fill="#7b57e8" strokeWidth={0} />
+              人际关系
+            </h3>
+            <div style={{ flex: 1, overflowY: "auto", paddingRight: "4px" }} className="cp-scroll-guard">
+              {loadingRelationships ? (
+                <div style={{ padding: "40px 0", textAlign: "center", color: "rgba(62, 67, 95, 0.42)" }}>
+                  <RefreshCw size={24} className="cp-spin" style={{ margin: "0 auto 12px" }} />
+                  <p style={{ fontSize: "14px" }}>正在分析社交网络...</p>
+                </div>
+              ) : relationships.length === 0 ? (
+                <p style={{ padding: "40px 0", textAlign: "center", color: "rgba(62, 67, 95, 0.42)", fontSize: "14px" }}>暂无深度关系分析</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                  {relationships.map((rel, idx) => (
+                    <div key={idx} style={{ padding: "18px", background: "rgba(123, 87, 232, 0.04)", border: "1px solid rgba(123, 87, 232, 0.08)", borderRadius: "20px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                        <strong style={{ fontSize: "16px", color: "#20243a" }}>{rel.name}</strong>
+                        <span style={{ 
+                          background: "rgba(123, 87, 232, 0.12)", 
+                          color: "#7b57e8", 
+                          fontSize: "11px", 
+                          fontWeight: 700, 
+                          padding: "3px 10px", 
+                          borderRadius: "10px" 
+                        }}>{rel.goodwillLabel}</span>
+                      </div>
+                      <p style={{ fontSize: "13px", color: "rgba(62, 67, 95, 0.78)", lineHeight: 1.6, margin: 0 }}>{rel.impression}</p>
+                      {rel.recentInteraction && (
+                        <div style={{ 
+                          marginTop: "12px", 
+                          paddingTop: "12px", 
+                          borderTop: "1px dashed rgba(123, 87, 232, 0.14)", 
+                          fontSize: "11px", 
+                          color: "rgba(62, 67, 95, 0.48)",
+                          display: "flex",
+                          gap: "4px"
+                        }}>
+                          <span style={{ flexShrink: 0 }}>交互回顾:</span>
+                          <span>{rel.recentInteraction}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button 
+              onClick={() => setRelationshipsOpen(false)} 
+              style={{ 
+                marginTop: "24px", 
+                height: "52px",
+                background: "#7b57e8", 
+                color: "#fff", 
+                borderRadius: "16px",
+                fontWeight: 600,
+                fontSize: "15px",
+                border: "none",
+                boxShadow: "0 12px 24px rgba(123, 87, 232, 0.2)"
+              }}
+            >
+              了解完毕
+            </button>
+          </div>
+        </div>
+      )}
       {confirmClearOpen && (
         <ConfirmDialog
           title="清空聊天内容？"

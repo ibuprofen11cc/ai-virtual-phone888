@@ -5251,6 +5251,123 @@ function normalizeChatPayload(payload: unknown): Partial<CheckPhoneChatPayload> 
   };
 }
 
+export async function continueCheckPhoneChatThread(
+  characterId: string,
+  threadId: string,
+  currentPayload: CheckPhoneChatPayload,
+): Promise<{ payload: CheckPhoneChatPayload; error?: string; debugRawOutput?: string }> {
+  const { apiConfig, preset, worldBooks, regexes } = resolveCheckPhoneConfigs(characterId);
+  if (!apiConfig) return { payload: currentPayload, error: "未找到可用的 API 配置" };
+
+  try {
+    const isGroup = threadId.includes("_group_");
+    const thread = isGroup
+      ? currentPayload.groups.find((g) => g.id === threadId)
+      : currentPayload.conversations.find((c) => c.id === threadId);
+
+    if (!thread) return { payload: currentPayload, error: "未找到指定的会话" };
+
+    const promptContext = [
+      `当前正在进行的会话：${thread.name}`,
+      `已有消息历史：`,
+      ...thread.messages.map((m) => `- ${m.authorLabel || (m.direction === "outgoing" ? "我" : "对方")}: ${m.text} [${m.timeLabel}]`),
+      `请接着上面的对话继续生成 3-5 条新消息。`,
+      `保持角色性格和对话情境一致。`,
+    ].join("\n");
+
+    const messages = await buildCheckPhoneAppMessages(characterId, "chat", preset, worldBooks, regexes, {
+      snapshotSummary: promptContext,
+    });
+
+    const rawOutput = await sendLLMRequest(
+      apiConfig,
+      preset,
+      messages,
+      regexes,
+      { characterName: loadCharacters().find((item) => item.id === characterId)?.name },
+      { skipOutputRegex: true, appId: "checkphone_chat_continue" },
+    );
+
+    if (!rawOutput?.trim()) return { payload: currentPayload, error: "LLM 返回为空" };
+    const { parsed } = parseChatBlockPayload(rawOutput);
+    const normalized = normalizeChatPayload(parsed);
+    
+    if (!normalized) return { payload: currentPayload, error: "无法解析新消息" };
+
+    const newMessages = isGroup 
+      ? (normalized.groups?.[0]?.messages ?? [])
+      : (normalized.conversations?.[0]?.messages ?? []);
+
+    if (newMessages.length === 0) return { payload: currentPayload, error: "未生成新消息" };
+
+    const nextPayload = { ...currentPayload };
+    if (isGroup) {
+      nextPayload.groups = nextPayload.groups.map(g => g.id === threadId ? { ...g, messages: [...g.messages, ...newMessages].slice(-20) } : g);
+    } else {
+      nextPayload.conversations = nextPayload.conversations.map(c => c.id === threadId ? { ...c, messages: [...c.messages, ...newMessages].slice(-20) } : c);
+    }
+
+    return { payload: nextPayload, debugRawOutput: rawOutput };
+  } catch (error) {
+    return { payload: currentPayload, error: error instanceof Error ? error.message : "生成失败" };
+  }
+}
+
+export async function generateCheckPhoneChatRelationships(
+  characterId: string,
+  currentPayload: CheckPhoneChatPayload,
+): Promise<{ relationships: CheckPhoneChatRelationship[]; error?: string; debugRawOutput?: string }> {
+  const { apiConfig, preset, worldBooks, regexes } = resolveCheckPhoneConfigs(characterId);
+  if (!apiConfig) return { relationships: [], error: "未找到可用的 API 配置" };
+
+  try {
+    const chars = loadCharacters();
+    const characterName = chars.find((item) => item.id === characterId)?.name || "我";
+    
+    const contactNames = [
+      ...currentPayload.conversations.map(c => c.name),
+      ...currentPayload.contacts.map(c => c.name)
+    ];
+    const uniqueNames = Array.from(new Set(contactNames)).filter(Boolean);
+
+    const promptContext = [
+      `请根据以下聊天背景和联系人列表，通过角色 ${characterName} 的视角，描述他对这些人的“好感度”和“印象”：`,
+      `联系人：${uniqueNames.join("、")}`,
+      `要求：返回一个 JSON 数组，格式为：[{"name": "姓名", "goodwillLabel": "如：亲密/疏离/暗恋", "impression": "一句话印象", "recentInteraction": "最近的互动总结"}]`,
+    ].join("\n");
+
+    const messages = await buildCheckPhoneAppMessages(characterId, "chat", preset, worldBooks, regexes, {
+      snapshotSummary: promptContext,
+    });
+
+    const rawOutput = await sendLLMRequest(
+      apiConfig,
+      preset,
+      messages,
+      regexes,
+      { characterName },
+      { skipOutputRegex: true, appId: "checkphone_chat_relationships" },
+    );
+
+    const { parsed } = parseCheckPhoneJson(rawOutput);
+    const relationships = (Array.isArray(parsed) ? parsed : Array.isArray((parsed as any)?.relationships) ? (parsed as any).relationships : [])
+      .map((item: any) => {
+        const matched = matchCharacterByName(item.name, chars);
+        return {
+          characterId: matched?.id,
+          name: item.name,
+          goodwillLabel: item.goodwillLabel || "普通",
+          impression: item.impression || "无特殊印象",
+          recentInteraction: item.recentInteraction,
+        };
+      });
+
+    return { relationships, debugRawOutput: rawOutput };
+  } catch (error) {
+    return { relationships: [], error: error instanceof Error ? error.message : "生成失败" };
+  }
+}
+
 export async function generateCheckPhoneChat(
   characterId: string,
   previousPayload?: CheckPhoneChatPayload | null,

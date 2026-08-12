@@ -209,6 +209,14 @@ export type CheckPhoneChatContact = {
   characterId?: string;
 };
 
+export type CheckPhoneChatRelationship = {
+  characterId?: string;
+  name: string;
+  goodwillLabel: string;
+  impression: string;
+  recentInteraction?: string;
+};
+
 export type CheckPhoneChatPayload = {
   headerTitle: string;
   headerSubtitle: string;
@@ -216,6 +224,7 @@ export type CheckPhoneChatPayload = {
   groups: CheckPhoneChatGroup[];
   momentsFeed: CheckPhoneChatMomentItem[];
   contacts: CheckPhoneChatContact[];
+  relationships?: CheckPhoneChatRelationship[];
 };
 
 export type CheckPhoneAssetAccountKind = "cash" | "savings" | "investment" | "credit";
