@@ -586,18 +586,24 @@ function CheckPhoneMomentMedia({
   );
 }
 
+import { loadCharacters } from "@/lib/character-storage";
+
 function CheckPhoneBubbleAvatar({
   label,
   outgoing,
   visible,
   reserveSpace = true,
+  characterId,
 }: {
   label: string;
   outgoing: boolean;
   visible: boolean;
   reserveSpace?: boolean;
+  characterId?: string;
 }) {
   if (!visible && !reserveSpace) return null;
+
+  const character = useMemo(() => characterId ? loadCharacters().find(c => c.id === characterId) : null, [characterId]);
 
   return (
     <div
@@ -617,9 +623,12 @@ function CheckPhoneBubbleAvatar({
         flexShrink: 0,
         visibility: visible ? "visible" : "hidden",
         boxShadow: visible ? "0 6px 14px rgba(82, 88, 123, 0.05)" : "none",
+        overflow: "hidden",
       }}
     >
-      {label}
+      {visible && character?.avatar ? (
+        <img src={character.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      ) : label}
     </div>
   );
 }
@@ -1203,9 +1212,12 @@ export function CheckPhoneChatPage({
                             color: "#7b57e8",
                             fontWeight: "600",
                             flexShrink: 0,
+                            overflow: "hidden",
                           }}
                       >
-                        {getInitial(conversationName)}
+                        {item.characterId && loadCharacters().find(c => c.id === item.characterId)?.avatar ? (
+                          <img src={loadCharacters().find(c => c.id === item.characterId)?.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : getInitial(conversationName)}
                       </div>
                       <div
                         style={{
@@ -1498,9 +1510,12 @@ export function CheckPhoneChatPage({
                               fontSize: "calc(14px*var(--app-text-scale,1))",
                               color: "#7b57e8",
                               fontWeight: "600",
+                              overflow: "hidden",
                           }}
                         >
-                          {getInitial(item.authorLabel)}
+                          {item.characterId && loadCharacters().find(c => c.id === item.characterId)?.avatar ? (
+                            <img src={loadCharacters().find(c => c.id === item.characterId)?.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          ) : getInitial(item.authorLabel)}
                         </div>
                         <div
                           style={{
@@ -1743,9 +1758,12 @@ export function CheckPhoneChatPage({
                             color: "#7b57e8",
                             fontWeight: "600",
                           flexShrink: 0,
+                          overflow: "hidden",
                         }}
                       >
-                        {getInitial(item.name)}
+                        {item.characterId && loadCharacters().find(c => c.id === item.characterId)?.avatar ? (
+                          <img src={loadCharacters().find(c => c.id === item.characterId)?.avatar} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : getInitial(item.name)}
                       </div>
                       <div
                         style={{
@@ -1958,6 +1976,7 @@ export function CheckPhoneChatPage({
                           outgoing={outgoing}
                           visible={!outgoing && !groupedWithPrevious}
                           reserveSpace={!outgoing}
+                          characterId={message.characterId || (outgoing ? undefined : activeConversation.characterId)}
                         />
                         <div
                           style={{
@@ -2101,6 +2120,7 @@ export function CheckPhoneChatPage({
                           outgoing={outgoing}
                           visible={!outgoing && !groupedWithPrevious}
                           reserveSpace={!outgoing}
+                          characterId={message.characterId}
                         />
                         <div
                           style={{
