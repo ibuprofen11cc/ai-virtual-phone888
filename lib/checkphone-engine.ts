@@ -5392,10 +5392,14 @@ export async function generateCheckPhoneChatRelationships(
     ];
     const uniqueNames = Array.from(new Set(contactNames)).filter(Boolean);
 
+    const userName = resolveUserIdentity(characterId, "checkphone")?.name || "用户";
     const promptContext = [
-      `请根据以下聊天背景和联系人列表，通过角色 ${characterName} 的视角，描述他对这些人的“好感度”和“印象”：`,
-      targetName ? `【重点分析对象】：${targetName}` : `联系人：${uniqueNames.join("、")}`,
-      `要求：返回一个 JSON 数组，格式为：[{"name": "姓名", "goodwillLabel": "如：亲密/疏离/暗恋", "impression": "一句话印象", "recentInteraction": "最近的互动总结"}]`,
+      `你现在是角色 ${characterName}。`,
+      `请分析你手机里的聊天记录和联系人，描述你对他们的主观“好感度”和“内心印象”。`,
+      targetName ? `【当前对话对象】：${targetName}` : `【分析名单】：${uniqueNames.join("、")}`,
+      `注意：如果对话对象是“${userName}”，请以你对真实用户的态度来评价。`,
+      `要求：【仅】返回一个符合以下格式的 JSON 数组，不要包含任何 Markdown 代码块标签或多余文字：`,
+      `[{"name": "姓名", "goodwillLabel": "好感描述", "impression": "主观印象", "recentInteraction": "近期互动总结"}]`,
     ].join("\n");
 
     const messages = await buildCheckPhoneAppMessages(characterId, "chat", preset, worldBooks, regexes, {
@@ -5411,18 +5415,24 @@ export async function generateCheckPhoneChatRelationships(
       { skipOutputRegex: true, appId: "checkphone_chat_relationships" },
     );
 
-    const { parsed } = parseCheckPhoneJson(rawOutput);
-    const relationships = (Array.isArray(parsed) ? parsed : Array.isArray((parsed as any)?.relationships) ? (parsed as any).relationships : [])
-      .map((item: any) => {
-        const matched = matchCharacterByName(item.name, chars);
+    // 增强 JSON 提取逻辑，防止 AI 在 JSON 前后废话
+    const jsonMatch = rawOutput.match(/\[\s*\{[\s\S]*\}\s*\]/);
+    const jsonCandidate = jsonMatch ? jsonMatch[0] : rawOutput;
+    
+    const { parsed } = parseCheckPhoneJson(jsonCandidate);
+    const rawList = Array.isArray(parsed) ? parsed : Array.isArray((parsed as any)?.relationships) ? (parsed as any).relationships : [];
+    
+    const relationships = rawList.map((item: any) => {
+        const name = String(item.name || "").trim();
+        const matched = matchCharacterByName(name, chars);
         return {
           characterId: matched?.id,
-          name: item.name,
-          goodwillLabel: item.goodwillLabel || "普通",
-          impression: item.impression || "无特殊印象",
-          recentInteraction: item.recentInteraction,
+          name,
+          goodwillLabel: String(item.goodwillLabel || "普通").trim(),
+          impression: String(item.impression || "无特殊印象").trim(),
+          recentInteraction: item.recentInteraction ? String(item.recentInteraction).trim() : undefined,
         };
-      });
+      }).filter(r => r.name.length > 0);
 
     return { relationships, debugRawOutput: rawOutput };
   } catch (error) {

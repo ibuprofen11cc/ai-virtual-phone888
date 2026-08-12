@@ -841,9 +841,15 @@ export function CheckPhoneChatPage({
       targetName
     );
     if (nextRels.length > 0) {
-      // 找到匹配目标名称的那一条印象
-      const match = nextRels.find(r => r.name === targetName) || nextRels[0];
+      // 增强匹配逻辑：忽略空格、大小写，并支持包含匹配（防止 AI 返回的名称略有不同）
+      const normalizedTarget = targetName.trim().toLowerCase();
+      const match = nextRels.find(r => {
+        const n = r.name.trim().toLowerCase();
+        return n === normalizedTarget || n.includes(normalizedTarget) || normalizedTarget.includes(n);
+      }) || nextRels[0];
       setImpression(match);
+    } else {
+      setError("分析结果为空，请稍后重试");
     }
     setLoadingImpression(false);
   }
