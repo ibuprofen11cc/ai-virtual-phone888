@@ -831,7 +831,7 @@ export function CheckPhoneChatPage({
   }
 
   async function handleRefreshImpression(currentPayload?: CheckPhoneChatPayload) {
-    const targetName = activeConversation?.name || activeGroup?.name;
+    const targetName = activeConversationDisplayName || activeGroup?.name;
     if (!targetName) return;
     
     setLoadingImpression(true);
@@ -841,7 +841,9 @@ export function CheckPhoneChatPage({
       targetName
     );
     if (nextRels.length > 0) {
-      setImpression(nextRels[0]);
+      // 找到匹配目标名称的那一条印象
+      const match = nextRels.find(r => r.name === targetName) || nextRels[0];
+      setImpression(match);
     }
     setLoadingImpression(false);
   }
@@ -888,7 +890,9 @@ export function CheckPhoneChatPage({
 
   async function handleShowImpression() {
     setImpressionOpen(true);
-    if (impression) return;
+    // 每次点开都检查是否需要刷新（如果还没有当前会话的印象）
+    const targetName = activeConversationDisplayName || activeGroup?.name;
+    if (impression?.name === targetName) return;
     await handleRefreshImpression();
   }
 
@@ -2385,7 +2389,7 @@ export function CheckPhoneChatPage({
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
               <h3 style={{ margin: 0, fontSize: "calc(19px*var(--app-text-scale,1))", fontWeight: 600, color: "#20243a", display: "flex", alignItems: "center", gap: "10px" }}>
                 <Users size={20} color="#7b57e8" strokeWidth={2} />
-                角色关系网
+                {character.name} 的关系网
               </h3>
               <button 
                 onClick={handleRefreshRelationships} 
@@ -2418,6 +2422,20 @@ export function CheckPhoneChatPage({
                         }}>{rel.goodwillLabel}</span>
                       </div>
                       <p style={{ fontSize: "13px", color: "rgba(62, 67, 95, 0.78)", lineHeight: 1.6, margin: 0 }}>{rel.impression}</p>
+                      {rel.recentInteraction && (
+                        <div style={{ 
+                          marginTop: "12px", 
+                          paddingTop: "12px", 
+                          borderTop: "1px dashed rgba(123, 87, 232, 0.14)", 
+                          fontSize: "11px", 
+                          color: "rgba(62, 67, 95, 0.48)",
+                          display: "flex",
+                          gap: "4px"
+                        }}>
+                          <span style={{ flexShrink: 0 }}>互动回顾:</span>
+                          <span>{rel.recentInteraction}</span>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
